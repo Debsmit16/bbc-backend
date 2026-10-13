@@ -185,24 +185,28 @@ const sendMessage = async (threadId, userId, text) => {
   const recipientId = thread.participants.find((participantId) => String(participantId) !== String(userId));
 
   // Broadcast realtime new_message event over Supabase
-  void broadcastFeedEvent('new_message', {
-    threadId: String(thread._id),
-    senderId: String(userId),
-    recipientId: recipientId ? String(recipientId) : null,
-    participants: thread.participants.map(String),
-    message: {
-      id: String(message._id),
+  try {
+    await broadcastFeedEvent('new_message', {
       threadId: String(thread._id),
       senderId: String(userId),
-      text: message.text,
-      createdAt: message.createdAt,
-      deliveredAt: message.deliveredAt || null,
-      seenAt: message.seenAt || null,
-      receiptStatus: 'sent',
-    },
-    lastMessage: message.text,
-    lastMessageAt: createdAt,
-  });
+      recipientId: recipientId ? String(recipientId) : null,
+      participants: thread.participants.map(String),
+      message: {
+        id: String(message._id),
+        threadId: String(thread._id),
+        senderId: String(userId),
+        text: message.text,
+        createdAt: message.createdAt,
+        deliveredAt: message.deliveredAt || null,
+        seenAt: message.seenAt || null,
+        receiptStatus: 'sent',
+      },
+      lastMessage: message.text,
+      lastMessageAt: createdAt,
+    });
+  } catch (err) {
+    console.warn('[message.service] Supabase new_message broadcast failed:', err?.message || err);
+  }
 
   if (recipientId) {
     try {
@@ -235,7 +239,7 @@ const markMessagesDelivered = async (userId) => {
     sender: { $ne: userId },
     status: 'sent',
     deliveredAt: null,
-  }).select('sender').lean();
+  }).select('sender conversation').lean();
 
   if (!pending.length) return { deliveredCount: 0 };
   const deliveredAt = new Date();
@@ -245,10 +249,16 @@ const markMessagesDelivered = async (userId) => {
   );
   await notifyUsers(pending.map((message) => message.sender));
 
-  void broadcastFeedEvent('messages_delivered', {
-    recipientId: String(userId),
-    deliveredAt,
-  });
+  try {
+    await broadcastFeedEvent('messages_delivered', {
+      recipientId: String(userId),
+      deliveredAt,
+      threadIds: [...new Set(pending.map((m) => String(m.conversation)))],
+      messageIds: pending.map((m) => String(m._id)),
+    });
+  } catch (err) {
+    console.warn('[message.service] Supabase messages_delivered broadcast failed:', err?.message || err);
+  }
 
   return { deliveredCount: result.modifiedCount, deliveredAt };
 };
@@ -274,14 +284,35 @@ const markThreadRead = async (threadId, userId) => {
   await thread.save();
   if (unseen.length) await notifyUsers(unseen.map((message) => message.sender));
 
-  void broadcastFeedEvent('message_read', {
-    threadId: String(thread._id),
-    readerId: String(userId),
-    participants: thread.participants.map(String),
-    seenAt,
-  });
+  try {
+    await broadcastFeedEvent('message_read', {
+      threadId: String(thread._id),
+      readerId: String(userId),
+      participants: thread.participants.map(String),
+      seenAt,
+    });
+  } catch (err) {
+    console.warn('[message.service] Supabase message_read broadcast failed:', err?.message || err);
+  }
 
   return { threadId: String(thread._id), unreadCount: 0, seenCount: unseen.length, seenAt };
+};
+
+const sendTypingStatus = async (threadId, userId, isTyping) => {
+  const thread = await assertMembership(threadId, userId);
+  const recipientId = thread.participants.find((p) => String(p) !== String(userId));
+  try {
+    await broadcastFeedEvent('typing', {
+      threadId: String(thread._id),
+      userId: String(userId),
+      recipientId: recipientId ? String(recipientId) : null,
+      participants: thread.participants.map(String),
+      isTyping: Boolean(isTyping),
+    });
+  } catch (err) {
+    console.warn('[message.service] Supabase typing broadcast failed:', err?.message || err);
+  }
+  return { success: true };
 };
 
 module.exports = {
@@ -292,4 +323,5 @@ module.exports = {
   sendMessage,
   markMessagesDelivered,
   markThreadRead,
+  sendTypingStatus,
 };

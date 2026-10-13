@@ -12,5 +12,6 @@ router.patch('/delivered', messageController.markMessagesDelivered);
 router.get('/threads/:threadId', messageController.getMessages);
 router.post('/threads/:threadId', messageController.sendMessage);
 router.patch('/threads/:threadId/read', messageController.markThreadRead);
+router.post('/threads/:threadId/typing', messageController.sendTypingStatus);
 
 module.exports = router;

@@ -68,6 +68,19 @@ const markThreadRead = async (req, res) => {
   }
 };
 
+const sendTypingStatus = async (req, res) => {
+  try {
+    const data = await messageService.sendTypingStatus(
+      req.params.threadId,
+      req.user._id,
+      req.body.isTyping
+    );
+    return sendSuccess(res, data, 'Typing status updated.');
+  } catch (error) {
+    return sendError(res, error.message, error.statusCode || 500, error);
+  }
+};
+
 module.exports = {
   getRealtimeToken,
   listThreads,
@@ -76,4 +89,5 @@ module.exports = {
   sendMessage,
   markMessagesDelivered,
   markThreadRead,
+  sendTypingStatus,
 };
