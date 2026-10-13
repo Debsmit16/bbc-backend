@@ -184,6 +184,30 @@ const sendMessage = async (threadId, userId, text) => {
   await notifyUsers(thread.participants);
   const recipientId = thread.participants.find((participantId) => String(participantId) !== String(userId));
 
+  let isDelivered = false;
+  if (recipientId) {
+    try {
+      const members = await getMemberCards([userId]);
+      const sender = members.get(String(userId));
+      const pushResult = await sendToUser(recipientId, {
+        title: sender?.name || 'New BBC message',
+        body: message.text,
+        data: {
+          type: 'message',
+          threadId: String(thread._id),
+          senderId: String(userId),
+        },
+      });
+      if (pushResult && pushResult.queued > 0) {
+        isDelivered = true;
+        message.deliveredAt = new Date();
+        await message.save();
+      }
+    } catch (pushErr) {
+      console.warn('[message.service] Push notification delivery failed:', pushErr?.message || pushErr);
+    }
+  }
+
   // Broadcast realtime new_message event over Supabase
   try {
     await broadcastFeedEvent('new_message', {
@@ -199,7 +223,7 @@ const sendMessage = async (threadId, userId, text) => {
         createdAt: message.createdAt,
         deliveredAt: message.deliveredAt || null,
         seenAt: message.seenAt || null,
-        receiptStatus: 'sent',
+        receiptStatus: message.deliveredAt ? 'delivered' : 'sent',
       },
       lastMessage: message.text,
       lastMessageAt: createdAt,
@@ -208,23 +232,19 @@ const sendMessage = async (threadId, userId, text) => {
     console.warn('[message.service] Supabase new_message broadcast failed:', err?.message || err);
   }
 
-  if (recipientId) {
+  if (isDelivered) {
     try {
-      const members = await getMemberCards([userId]);
-      const sender = members.get(String(userId));
-      await sendToUser(recipientId, {
-        title: sender?.name || 'New BBC message',
-        body: message.text,
-        data: {
-          type: 'message',
-          threadId: String(thread._id),
-          senderId: String(userId),
-        },
+      await broadcastFeedEvent('messages_delivered', {
+        recipientId: String(recipientId),
+        deliveredAt: message.deliveredAt,
+        threadIds: [String(thread._id)],
+        messageIds: [String(message._id)],
       });
-    } catch (_) {
-      // Message delivery must not fail if the optional push notification cannot be sent.
+    } catch (delivErr) {
+      console.warn('[message.service] Supabase messages_delivered broadcast failed:', delivErr?.message || delivErr);
     }
   }
+
   return serializeMessage(message, userId);
 };
 

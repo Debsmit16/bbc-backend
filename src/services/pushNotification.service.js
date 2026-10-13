@@ -60,7 +60,7 @@ const unregisterToken = async (userId, token) => {
 const sendToUser = async (userId, { title, body, data = {} }) => {
   const { Expo, client: expo } = await getExpoClient();
 
-  const records = await PushToken.find({ user: userId, platform: 'android', active: true }).lean();
+  const records = await PushToken.find({ user: userId, active: true }).lean();
   const validRecords = records.filter((record) => Expo.isExpoPushToken(record.token));
   if (!validRecords.length) return { queued: 0 };
 
